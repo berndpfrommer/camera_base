@@ -9,6 +9,7 @@
 #include <camera_info_manager/camera_info_manager.h>
 #include <diagnostic_updater/publisher.h>
 #include <diagnostic_updater/diagnostic_updater.h>
+#include <memory>
 
 namespace camera_base {
 
@@ -42,15 +43,36 @@ class CameraRosBase {
         cinfo_mgr_(cnh_, getParam<std::string>(cnh_, "camera_name"),
                    getParam<std::string>(cnh_, "calib_url")),
         fps_(10.0),
-        diagnostic_updater_(pnh_, cnh_),
-        topic_diagnostic_(
-            prefix.empty() ? "image_raw" : (prefix + "/image_raw"),
-            diagnostic_updater_,
-            diagnostic_updater::FrequencyStatusParam(&fps_, &fps_, 0.1, 10),
-            diagnostic_updater::TimeStampStatusParam(-0.01, 0.1)) {
+        diagnostic_updater_(pnh_, cnh_) {
+    SetTopicDiagnosticParameters(fps_ * 0.9, fps_ * 1.1, 10.0, -0.01, 0.1);
     cnh_.param<std::string>("frame_id", frame_id_, cnh_.getNamespace());
     cnh_.param<std::string>("identifier", identifier_, "");
   }
+  /**
+   * @brief SetTopicDiagnosticParameters Set limits for topic diagnostics
+   * @param minFreq  min allowed frequency
+   * @param maxFreq  max allowed frequency
+   * @param windowSize [sec]
+   * @param minDelay  min allowed delay of timestamp [how much early]
+   * @param maxDelay  max allowed delay of timestamp [how much late]
+   */
+  void SetTopicDiagnosticParameters(double minFreq, double maxFreq,
+                                    double windowSize,
+                                    double minDelay, double maxDelay) {
+    min_fps_ = minFreq;
+    max_fps_ = maxFreq;
+    std::string prefix = cnh_.getNamespace();
+    std::string name = prefix.empty() ? "image_raw" : (prefix + "/image_raw");
+
+    // must first remove old updater
+    diagnostic_updater_.removeByName(name + " topic status");
+    topic_diagnostic_.reset(new diagnostic_updater::TopicDiagnostic(
+      name, diagnostic_updater_,
+      diagnostic_updater::FrequencyStatusParam(&min_fps_, &max_fps_, 0.0, windowSize),
+        diagnostic_updater::TimeStampStatusParam(minDelay, maxDelay)));
+
+  }
+
 
   CameraRosBase() = delete;
   CameraRosBase(const CameraRosBase&) = delete;
@@ -70,7 +92,6 @@ class CameraRosBase {
   void SetHardwareId(const std::string& id) {
     diagnostic_updater_.setHardwareID(id);
   }
-
   /**
    * @brief PublishCamera Publish a camera topic with Image and CameraInfo
    * @param time Acquisition time stamp
@@ -85,7 +106,7 @@ class CameraRosBase {
       // Update camera info header
       cinfo_msg->header = image_msg->header;
       camera_pub_.publish(image_msg, cinfo_msg);
-      topic_diagnostic_.tick(image_msg->header.stamp);
+      topic_diagnostic_->tick(image_msg->header.stamp);
     }
     diagnostic_updater_.update();
   }
@@ -97,7 +118,7 @@ class CameraRosBase {
     image_msg->header.frame_id = frame_id_;
     cinfo_msg->header = image_msg->header;
     camera_pub_.publish(image_msg, cinfo_msg);
-    topic_diagnostic_.tick(image_msg->header.stamp);
+    topic_diagnostic_->tick(image_msg->header.stamp);
     diagnostic_updater_.update();
   }
 
@@ -116,8 +137,10 @@ class CameraRosBase {
   image_transport::CameraPublisher camera_pub_;
   camera_info_manager::CameraInfoManager cinfo_mgr_;
   double fps_;
+  double min_fps_;
+  double max_fps_;
   diagnostic_updater::Updater diagnostic_updater_;
-  diagnostic_updater::TopicDiagnostic topic_diagnostic_;
+  std::shared_ptr<diagnostic_updater::TopicDiagnostic> topic_diagnostic_;
   std::string frame_id_;
   std::string identifier_;
 };
