@@ -130,6 +130,10 @@ class CameraRosBase {
   virtual bool Grab(const sensor_msgs::ImagePtr& image_msg,
                     const sensor_msgs::CameraInfoPtr& cinfo_msgs = nullptr) = 0;
 
+  int getNumSubscribers() const {
+    return (camera_pub_.getNumSubscribers());
+  }
+
  private:
   ros::NodeHandle pnh_;
   ros::NodeHandle cnh_;
